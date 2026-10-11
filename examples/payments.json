@@ -1,0 +1,7 @@
+{
+  "source": "demo-payments",
+  "rows": [
+    {"source":"demo-payments","external_payment_id":"PAY-001","amount":"200.00","currency":"GBP","received_on":"2026-10-02","raw_reference":"BATCH-01","target_invoice_source":null,"target_external_invoice_id":null},
+    {"source":"demo-payments","external_payment_id":"PAY-002","amount":"60.00","currency":"GBP","received_on":"2026-10-02","raw_reference":"INV-103","target_invoice_source":"demo-invoices","target_external_invoice_id":"INV-103"}
+  ]
+}

@@ -1,0 +1,139 @@
+name: Java, Python and real ledger integration
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: corretto
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: backend/pom.xml
+      - name: Build and test with one PostgreSQL Testcontainer
+        working-directory: backend
+        run: ./mvnw -B -ntp verify
+      - name: Save test reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: backend-test-reports
+          path: backend/target/surefire-reports/
+          if-no-files-found: warn
+  importer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13.16'
+      - name: Install hash-locked test dependencies
+        run: RK_PYTHON="$(command -v python3.13)" scripts/setup-cli-tests.sh
+      - name: Test full-file validation, HTTP failures and truthful traces
+        run: scripts/test-cli.sh --junitxml=importer-tests.xml
+      - name: Check deployment probe safety guards
+        run: python -I scripts/test-check-deployment.py
+      - name: Check isolated recovery safety guards
+        run: python -I scripts/test-recovery-guards.py
+      - name: Bind recording HTTP and SQL to the same selected stack
+        run: python -I scripts/test-record-demo.py
+      - name: Save importer test report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: importer-test-reports
+          path: importer-tests.xml
+          if-no-files-found: warn
+  integration:
+    needs: [backend, importer]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13.16'
+      - name: Prepare a private environment for a new synthetic stack
+        run: |
+          mkdir -p .runtime/ci-artifacts
+          python -I - <<'PY'
+          from pathlib import Path
+          import secrets
+          path = Path('.runtime/e2e.env')
+          path.write_text('DB_NAME=reconcilekit\nDB_USER=reconcilekit\nDB_PASSWORD=' + secrets.token_hex(32) + '\nAPP_PORT=18090\nIMAGE_TAG=ci-extended\n')
+          path.chmod(0o600)
+          restore = Path('.runtime/restore.env')
+          restore.write_text('DB_NAME=reconcilekit\nDB_USER=reconcilekit\nDB_PASSWORD=' + secrets.token_hex(32) + '\nAPP_PORT=18091\nIMAGE_TAG=ci-extended\n')
+          restore.chmod(0o600)
+          PY
+      - name: Build pinned images and start healthy containers
+        run: scripts/start.sh rk-ci-extended .runtime/e2e.env
+      - name: Assert all six business tables are empty
+        run: |
+          docker compose --project-name rk-ci-extended --env-file .runtime/e2e.env --file infra/compose.yaml exec -T database psql -U reconcilekit -d reconcilekit -v ON_ERROR_STOP=1 -c "DO \$\$ BEGIN IF (SELECT count(*) FROM invoices)+(SELECT count(*) FROM payments)+(SELECT count(*) FROM allocations)+(SELECT count(*) FROM audit_events)+(SELECT count(*) FROM idempotency_records)+(SELECT count(*) FROM import_batches) <> 0 THEN RAISE EXCEPTION 'Expected an empty synthetic ledger'; END IF; END \$\$;"
+      - name: Real CSV, auto/manual, partial failure and lost response integration
+        run: RK_PYTHON="$(command -v python3.13)" scripts/python.sh -I scripts/extended-demo.py --base-url http://127.0.0.1:18090
+      - name: Independently verify both ledger bounds and committed facts
+        run: |
+          docker compose --project-name rk-ci-extended --env-file .runtime/e2e.env --file infra/compose.yaml exec -T database psql -U reconcilekit -d reconcilekit < scripts/check-invariants.sql > .runtime/ci-artifacts/invariants.log
+          docker compose --project-name rk-ci-extended --env-file .runtime/e2e.env --file infra/compose.yaml exec -T database psql -U reconcilekit -d reconcilekit < scripts/check-extended.sql > .runtime/ci-artifacts/extended-facts.log
+          cat .runtime/ci-artifacts/invariants.log
+          cat .runtime/ci-artifacts/extended-facts.log
+      - name: Verify actual local container access and process restrictions
+        run: scripts/check-deployment.sh --project rk-ci-extended --env-file "$PWD/.runtime/e2e.env" > .runtime/ci-artifacts/deployment.json
+      - name: Recreate containers and restore a real backup into a fresh isolated volume
+        run: |
+          python -I scripts/recovery-check.py --project rk-ci-extended --env-file .runtime/e2e.env \
+            --source-root "$PWD" --image-tag ci-extended --restore-project rk-ci-restore \
+            --restore-env-file .runtime/restore.env --output-dir .runtime/recovery-ci \
+            --baseline-commit "$GITHUB_SHA" --runtime-baseline-commit "$GITHUB_SHA" \
+            --synthetic-extended-ledger
+      - name: Check both recovered stacks with their explicit pinned image configuration
+        run: |
+          scripts/check-deployment.sh --project rk-ci-extended --env-file "$PWD/.runtime/e2e.env" \
+            --compose-override "$PWD/.runtime/recovery-ci/source-images.json" > .runtime/ci-artifacts/recovered-source-deployment.json
+          scripts/check-deployment.sh --project rk-ci-restore --env-file "$PWD/.runtime/restore.env" \
+            --compose-override "$PWD/.runtime/recovery-ci/restore-images.json" > .runtime/ci-artifacts/recovered-restore-deployment.json
+      - name: Collect summary evidence
+        if: always()
+        run: |
+          python -I - <<'PY'
+          from pathlib import Path
+          import shutil
+          for run in Path('.runtime/extended-demo').glob('*'):
+              if run.is_dir():
+                  destination = Path('.runtime/ci-artifacts') / run.name
+                  destination.mkdir(exist_ok=True)
+                  for source in run.glob('*.json'):
+                      shutil.copyfile(source, destination / source.name)
+          recovery = Path('.runtime/recovery-ci/report.json')
+          if recovery.is_file():
+              shutil.copyfile(recovery, Path('.runtime/ci-artifacts/recovery.json'))
+          PY
+          docker compose --project-name rk-ci-extended --env-file .runtime/e2e.env --file infra/compose.yaml logs --no-color app > .runtime/ci-artifacts/app.log 2>&1
+      - name: Save integration summaries (no environment, CSV or request payload files)
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: real-ledger-integration
+          path: .runtime/ci-artifacts/
+          include-hidden-files: true
+          if-no-files-found: warn
+      - name: Stop this ephemeral CI stack
+        if: always()
+        run: |
+          docker compose --project-name rk-ci-extended --env-file .runtime/e2e.env --file infra/compose.yaml down
+          docker compose --project-name rk-ci-restore --env-file .runtime/restore.env --file infra/compose.yaml down

@@ -1,0 +1,11 @@
+{
+  "invoices": [
+    {"externalInvoiceId":"INV-101","status":"PAID","remaining":"0.00"},
+    {"externalInvoiceId":"INV-102","status":"PAID","remaining":"0.00"},
+    {"externalInvoiceId":"INV-103","status":"PARTIALLY_PAID","remaining":"40.00"}
+  ],
+  "payments": [
+    {"externalPaymentId":"PAY-001","status":"FULLY_ALLOCATED","remaining":"0.00"},
+    {"externalPaymentId":"PAY-002","status":"FULLY_ALLOCATED","remaining":"0.00"}
+  ]
+}

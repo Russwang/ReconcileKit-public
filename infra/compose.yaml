@@ -1,0 +1,52 @@
+services:
+  database:
+    image: postgres:17.11@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3
+    environment:
+      POSTGRES_DB: ${DB_NAME:-reconcilekit}
+      POSTGRES_USER: ${DB_USER:-reconcilekit}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set a nonempty DB_PASSWORD in the environment file}
+    volumes:
+      - database-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  app:
+    image: reconcilekit:${IMAGE_TAG:-local}
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    environment:
+      SERVER_ADDRESS: 0.0.0.0
+      PORT: 8080
+      DB_URL: jdbc:postgresql://database:5432/${DB_NAME:-reconcilekit}
+      DB_USER: ${DB_USER:-reconcilekit}
+      DB_PASSWORD: ${DB_PASSWORD:?Set a nonempty DB_PASSWORD in the environment file}
+    ports:
+      - target: 8080
+        published: "${APP_PORT:-8080}"
+        host_ip: 127.0.0.1
+        protocol: tcp
+    depends_on:
+      database:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8080/actuator/health"]
+      interval: 10s
+      timeout: 3s
+      start_period: 30s
+      retries: 12
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+volumes:
+  database-data:

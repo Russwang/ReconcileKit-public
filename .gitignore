@@ -1,0 +1,19 @@
+# Local credentials, runtimes and generated artifacts
+.tools
+.runtime
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+backend/target/
+__pycache__/
+.pytest_cache/
+.venv/
+*.pyc
+*.dump
+*.pem
+*.key
+.DS_Store
+importer-tests.xml

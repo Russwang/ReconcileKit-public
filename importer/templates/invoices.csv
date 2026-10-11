@@ -1,0 +1,4 @@
+source,external_invoice_id,amount,currency,issued_on
+demo-invoices,INV-101,120.00,GBP,2026-10-01
+demo-invoices,INV-102,80.00,GBP,2026-10-01
+demo-invoices,INV-103,100.00,GBP,2026-10-01

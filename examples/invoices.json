@@ -1,0 +1,8 @@
+{
+  "source": "demo-invoices",
+  "rows": [
+    {"source":"demo-invoices","external_invoice_id":"INV-101","amount":"120.00","currency":"GBP","issued_on":"2026-10-01"},
+    {"source":"demo-invoices","external_invoice_id":"INV-102","amount":"80.00","currency":"GBP","issued_on":"2026-10-01"},
+    {"source":"demo-invoices","external_invoice_id":"INV-103","amount":"100.00","currency":"GBP","issued_on":"2026-10-01"}
+  ]
+}

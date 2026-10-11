@@ -1,0 +1,3 @@
+source,external_payment_id,amount,currency,received_on,raw_reference,target_invoice_source,target_external_invoice_id
+demo-payments,PAY-001,200.00,GBP,2026-10-02,BATCH-01,,
+demo-payments,PAY-002,60.00,GBP,2026-10-02,INV-103,demo-invoices,INV-103
